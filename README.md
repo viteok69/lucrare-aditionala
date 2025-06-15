@@ -160,6 +160,281 @@ Pentru aceasta, în folderul ./files/ creați folderul cron. În folderul ./file
 
 # mesaj de stare
 
+În folderul ./files/cron/scripts/ creați fișierul 01_alive.sh cu următorul conținut:
+
+```bash
+#!/bin/sh
+echo "alive ${USERNAME}" > /proc/1/fd/1
+```
+![image](https://github.com/user-attachments/assets/e3c74277-ea3c-45c3-9e7e-51eca7457d6c)
+
+Acest script afișează mesajul alive ${USERNAME}.
+
+# copierea de rezervă a site-ului
+
+În folderul ./files/cron/scripts/ creați fișierul 02_backupsite.sh cu următorul conținut:
+
+```bash
+#!/bin/sh
+
+echo "[backup] create site backup" \
+    > /proc/1/fd/1 \
+    2> /proc/1/fd/2
+tar czfv /var/backups/site/www_$(date +\%Y\%m\%d).tar.gz /var/www/html
+echo "[backup] site backup done" \
+    >/proc/1/fd/1 \
+    2> /proc/1/fd/2
+```
+![image](https://github.com/user-attachments/assets/356860ca-d6d0-411e-a3c3-5b6a5d0040b1)
+
+Acest script arhivează folderul /var/www/html și salvează arhiva în /var/backups/site/.
+
+# copierea de rezervă a bazei de date
+
+În folderul ./files/cron/scripts/ creați fișierul 03_mysqldump.sh cu următorul conținut:
+
+```bash
+#!/bin/sh
+
+echo "[backup] create mysql dump of ${MARIADB_DATABASE} database" \
+    > /proc/1/fd/1
+mysqldump -u ${MARIADB_USER} --password=${MARIADB_PASSWORD} -v -h mariadb ${MARIADB_DATABASE} \
+    | gzip -c > /var/backups/mysql/${MARIADB_DATABASE}_$(date +\%F_\%T).sql.gz 2> /proc/1/fd/1
+echo "[backup] sql dump created" \
+    > /proc/1/fd/1
+```
+![image](https://github.com/user-attachments/assets/e071d7e6-06f7-4c7b-ae2d-ce868065f179)
+
+# ștergerea fișierelor vechi
+
+În folderul ./files/cron/scripts/ creați fișierul 04_clean.sh cu următorul conținut:
+
+```bash
+#!/bin/sh
+
+echo "[backup] remove old backups" \
+    > /proc/1/fd/1 \
+    2> /proc/1/fd/2
+find /var/backups/mysql -type f -mtime +30 -delete \
+    > /proc/1/fd/1 \
+    2> /proc/1/fd/2
+find /var/backups/site -type f -mtime +30 -delete \
+    > /proc/1/fd/1 \
+    2> /proc/1/fd/2
+echo "[backup] done" \
+    > /proc/1/fd/1 \
+    2> /proc/1/fd/2
+```
+![image](https://github.com/user-attachments/assets/bdffe683-4db5-4900-a597-26210f26a68f)
+
+# pregătirea cron
+
+În folderul ./files/cron/scripts/ creați fișierul environment.sh cu următorul conținut:
+
+```bash
+#!/bin/sh
+
+env >> /etc/environment
+
+# execute CMD
+echo "Start cron" >/proc/1/fd/1 2>/proc/1/fd/2
+echo "$@"
+exec "$@"
+```
+![image](https://github.com/user-attachments/assets/e6fd120e-4b00-44d9-a1f1-5deafb410ba2)
+
+În folderul ./files/cron/ creați fișierul crontab cu următorul conținut:
+
+```bash
+# Example of job definition:
+# .---------------- minute (0 - 59)
+# |  .------------- hour (0 - 23)
+# |  |  .---------- day of month (1 - 31)
+# |  |  |  .------- month (1 - 12) OR jan,feb,mar,apr ...
+# |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
+# |  |  |  |  |
+# *  *  *  *  * user-name command to be executed
+  *  *  *  *  * /scripts/01_alive.sh > /dev/null
+  *  *  *  *  * /scripts/02_backupsite.sh > /dev/null
+  *  *  *  *  * /scripts/03_mysqldump.sh > /dev/null
+  *  *  *  *  * /scripts/04_clean.sh > /dev/null
+# Don't remove the empty line at the end of this file. It is required to run the cron job
+```
+![image](https://github.com/user-attachments/assets/8b8dada8-d7c0-436f-8b62-4fafac924082)
+
+#crearea containerului cron
+
+Creați în directorul rădăcină fișierul Dockerfile.cron cu următorul conținut:
+
+```bash
+FROM debian:latest
+
+RUN apt update && apt -y upgrade && apt install -y cron mariadb-client
+
+COPY ./files/cron/crontab /etc/cron.d/crontab
+COPY ./files/cron/scripts/ /scripts/
+
+RUN crontab /etc/cron.d/crontab
+
+ENTRYPOINT [ "/scripts/environment.sh" ]
+CMD [ "cron", "-f" ]
+```
+![image](https://github.com/user-attachments/assets/76e94008-a944-4d8d-b9fe-be3686cae74c)
+
+Editați fișierul docker-compose.yml, adăugând după definiția serviciului mariadb următoarele linii:
+
+```bash
+  cron:
+    build:
+      context: ./
+      dockerfile: Dockerfile.cron
+    environment:
+      USERNAME: <nume prenume>
+      MARIADB_DATABASE: sample
+      MARIADB_USER: sampleuser
+      MARIADB_PASSWORD: samplepassword
+    volumes:
+      - "./backups/:/var/backups/"
+      - "./site/wordpress/:/var/www/html/"
+    networks:
+      - internal
+```
+Înlocuiți <nume prenume> cu numele și prenumele dvs.
+
+![image](https://github.com/user-attachments/assets/9a62880c-46e2-4ada-bafa-27c1a99deef7)
+
+
+
+## Lansare și testare
+
+În folderul lucrării de laborator, deschideți consola și executați comanda:
+
+```bash
+docker-compose build
+```
+![image](https://github.com/user-attachments/assets/6157b56f-e2a2-4138-a7a0-8b72e1f1b9ff)
+
+![image](https://github.com/user-attachments/assets/8a739b52-4749-4e90-b54c-64da04f502be)
+
+Pe baza definițiilor create, docker va construi imaginile serviciilor. Câte secunde a durat construirea proiectului?
+
+> Construirea proiectului a durat 62.1 secunde.
+
+Executați comanda:
+
+```bash
+docker-compose up -d
+```
+![image](https://github.com/user-attachments/assets/f1bbfc4e-be8e-4e1a-86e5-143e5d60a745)
+
+Pe baza imaginilor, se vor lansa containerele. Deschideți în browser pagina: http://wordpress.localhost și realizați instalarea site-ului. Rețineți că containerele se văd între ele după nume, astfel încât, la instalarea site-ului, trebuie să specificați pentru serverul bazei de date numele gazdei egal cu numele containerului, adică mariadb. Numele utilizatorului bazei de date, parola acestuia și numele bazei de date le puteți lua din fișierul docker-compose.yml.
+![image](https://github.com/user-attachments/assets/c7484ecb-d9c7-4295-a7d1-0bc1e19feee3)
+
+Citiți jurnalele fiecărui container. Pentru aceasta, executați comanda:
+
+```bash
+docker logs <numele containerului>
+```
+
+```bash
+docker logs additional-cron-1
+```
+![image](https://github.com/user-attachments/assets/88a2d0ef-67ef-47e4-a5aa-42abc277932f)
+
+```bash
+docker logs additional-httpd-1
+```
+![image](https://github.com/user-attachments/assets/ec0b0b9a-f402-4571-877a-51de7f16f17d)
+
+```bash
+docker logs additional-php-fpm-1
+```
+![image](https://github.com/user-attachments/assets/52aea036-6bab-4738-93cb-c2eec893098b)
+
+```bash
+docker logs additional-mariadb-1
+```
+![image](https://github.com/user-attachments/assets/dd8ba8bf-9d60-4c02-aba0-1f625496f070)
+
+Executați următoarele comenzi în ordine:
+```bash
+# opriți containerele
+docker-compose down
+# ștergeți containerele
+docker-compose rm
+```
+![image](https://github.com/user-attachments/assets/76a61086-d2eb-4e48-9b76-8da1f5209f20)
+
+Verificați dacă site-ul http://wordpress.localhost se deschide. Porniți din nou clusterul de containere:
+
+```bash
+docker-compose up -d
+```
+![image](https://github.com/user-attachments/assets/7364351d-8331-495e-ace2-8023981bbc92)
+
+și verificați funcționalitatea site-ului.
+![image](https://github.com/user-attachments/assets/29f1fdd9-00ec-4197-b521-2b519adc78a5)
+
+Așteptați 2-3 minute și verificați ce se află în directoarele ./backups/mysql/ și ./backups/site/.
+![image](https://github.com/user-attachments/assets/e9e285cf-e54e-4718-812e-47b81df37d2e)
+
+![image](https://github.com/user-attachments/assets/6a3febe5-808a-4691-b86d-6a940cd87c0c)
+
+Opriți containerele și modificați fișierul ./files/cron/crontab astfel încât:
+- în fiecare zi la ora 1:00 să se creeze o copie de rezervă a bazei de date CMS (sql dump);
+- în fiecare luni să se creeze o copie de rezervă a directorului CMS;
+- în fiecare zi la ora 2:00 să se șteargă copiile de rezervă care au fost create acum 30 de zile.
+![image](https://github.com/user-attachments/assets/b6b5af5f-4a14-4cee-98c6-d0b6ced533a9)
+
+![image](https://github.com/user-attachments/assets/443af084-c4f7-4b7d-aaf1-f087851bb5a9)
+
+Răspundeți la întrebări:
+
+- De ce este necesar să se creeze un utilizator al sistemului pentru fiecare site?
+
+Securitate: Izolează fiecare site. Dacă unul e compromis, celelalte sunt protejate. Atacatorul nu obține acces la tot serverul.
+Privilegiu Minim: Fiecare site are doar permisiunile strict necesare.
+  
+- În ce cazuri serverul Web trebuie să aibă acces complet la directoarele (folderul) site-ului?
+
+Niciodata "acces complet" (rwx) la tot site-ul.
+Serverul web (Apache/Nginx) are nevoie doar de citire pentru majoritatea fișierelor.
+Permisiuni de scriere sunt necesare doar pentru directoare specifice unde aplicația trebuie să scrie (ex: upload-uri, cache, loguri). Acestea sunt gestionate de procesele aplicației (PHP-FPM), nu direct de serverul web.
+  
+- Ce înseamnă comanda chmod -R 0755 /home/www/anydir?
+
+chmod: Schimbă permisiunile.
+-R: Schimbă recursiv (și subdirectoarele/fișierele).
+0755: Setează permisiunile:
+Proprietar (0755 = 7): Citire, Scriere, Execuție (rwx)
+Grup (0755 = 5): Citire, Execuție (r-x)
+Alții (0755 = 5): Citire, Execuție (r-x)
+/home/www/anydir: Directorul țintă.
+
+- În scripturile shell, fiecare comandă se termină cu linia > /proc/1/fd/1. Ce înseamnă aceasta?
+
+Redirecționarea Output-ului: Aceasta ia ieșirea standard a unei comenzi (ceea ce ar fi afișat pe ecran) și o trimite către o destinație specifică.
+/proc/1/fd/1: În context Docker, /proc/1/fd/1 reprezintă fluxul standard de ieșire (STDOUT) al procesului principal al containerului (care rulează ca PID 1).
+Concluzie: Toate mesajele și erorile generate de scripturile tale shell sunt redirectionate către STDOUT-ul containerului, făcându-le vizibile prin docker logs <nume_container>. Aceasta este o practică standard pentru a colecta jurnalele din containere.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
