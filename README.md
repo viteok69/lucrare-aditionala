@@ -156,6 +156,11 @@ Pentru realizarea copiilor de rezervă vom folosi containerul cron, care:
 - la fiecare 24 de ore șterge copiile de rezervă care au fost create acum 30 de zile.
 - În fiecare minut scrie în jurnal mesajul alive, \<username>.
 
+Pentru aceasta, în folderul ./files/ creați folderul cron. În folderul ./files/cron/ creați folderul scripts. În directorul rădăcină creați folderul backups, iar în acesta mysql, site.
+
+# mesaj de stare
+
+
 
 
 
